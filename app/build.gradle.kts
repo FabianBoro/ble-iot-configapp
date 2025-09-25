@@ -59,10 +59,11 @@ dependencies {
     // Lifecycle untuk ViewModel/Coroutine (opsional tapi biasanya dipakai)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.accompanist.systemuicontroller)
     // Activity result API (untuk minta permission runtime Bluetooth di Android 12+)
     implementation(libs.androidx.activity.ktx)
     //pakai coroutines buat komunikasi socket
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
-
+//    implementation(androidx.core:core-ktx:1.13.1)
 }
