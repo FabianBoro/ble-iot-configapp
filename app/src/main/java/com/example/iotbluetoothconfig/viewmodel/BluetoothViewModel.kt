@@ -1,8 +1,7 @@
 package com.example.iotbluetoothconfig.viewmodel
 
 import android.app.Application
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
+import android.bluetooth.*
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
@@ -21,18 +20,22 @@ class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
     private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
     private val bleScanner = bluetoothAdapter?.bluetoothLeScanner
 
-    // State untuk daftar device yang discan
+    // ✅ State daftar device hasil scan
     private val _devices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     val devices: StateFlow<List<BluetoothDevice>> = _devices
 
-    // BLE Callback
+    // ✅ State log monitor (Serial Monitor)
+    private val _logs = MutableStateFlow<List<String>>(emptyList())
+    val logs: StateFlow<List<String>> = _logs
+
+    // ---------- BLE Scan Callback ----------
     private val bleCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.device?.let { addDevice(it) }
         }
     }
 
-    // Classic Bluetooth Receiver
+    // ---------- Classic Bluetooth Receiver ----------
     private val classicReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             if (BluetoothDevice.ACTION_FOUND == intent?.action) {
@@ -44,11 +47,11 @@ class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        // register receiver untuk scan Classic
         val filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
         context.registerReceiver(classicReceiver, filter)
     }
 
+    // ---------- Scan ----------
     fun startScan() {
         viewModelScope.launch {
             _devices.value = emptyList()
@@ -70,6 +73,19 @@ class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
                 _devices.value = current + device
             }
         }
+    }
+
+    // ---------- Logs ----------
+    fun appendLog(message: String) {
+        viewModelScope.launch {
+            val updated = _logs.value.toMutableList()
+            updated.add(message)
+            _logs.value = updated
+        }
+    }
+
+    fun clearLogs() {
+        _logs.value = emptyList()
     }
 
     override fun onCleared() {

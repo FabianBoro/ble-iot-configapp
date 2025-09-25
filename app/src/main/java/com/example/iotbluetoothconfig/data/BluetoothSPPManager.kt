@@ -19,7 +19,7 @@ class BluetoothSPPManager {
 
     fun isBluetoothAvailable(): Boolean = adapter != null
 
-    fun connect(device: BluetoothDevice, onMessage: (String) -> Unit) {
+    fun connect(device: BluetoothDevice, onLog: (String) -> Unit) {
         thread {
             try {
                 socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
@@ -32,12 +32,12 @@ class BluetoothSPPManager {
                     val bytes = input?.read(buffer) ?: break
                     if (bytes > 0) {
                         val message = String(buffer, 0, bytes)
-                        onMessage(message)
+                        onLog(message) // kirim ke ViewModel
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                onMessage("Error: ${e.message}")
+                onLog("Error: ${e.message}")
             }
         }
     }
