@@ -1,16 +1,13 @@
 package com.example.iotbluetoothconfig
 
 import android.bluetooth.BluetoothAdapter
-import android.os.Bundle
 import androidx.activity.ComponentActivity
+import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -19,19 +16,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.iotbluetoothconfig.data.BluetoothSPPManager
 import com.example.iotbluetoothconfig.ui.theme.IoTBluetoothConfigTheme
-import com.example.iotbluetoothconfig.ui.view.ConfigPagerScreen
-import com.example.iotbluetoothconfig.ui.view.ConfigScreen
-import com.example.iotbluetoothconfig.ui.view.EmptyScreen
-import com.example.iotbluetoothconfig.ui.view.ScanScreen
+import com.example.iotbluetoothconfig.ui.view.*
 import com.example.iotbluetoothconfig.viewmodel.BluetoothViewModel
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         enableEdgeToEdge()
 
         setContent {
@@ -48,7 +40,7 @@ fun MainScreen(navController: NavHostController) {
     val items = listOf(
         BottomNavItem("Scan", "scan"),
         BottomNavItem("Config", "config/{address}"),
-        BottomNavItem("Other", "empty"),
+        BottomNavItem("GATT", "gatt"),
         BottomNavItem("Door lock", "empty")
     )
 
@@ -61,7 +53,7 @@ fun MainScreen(navController: NavHostController) {
                         label = { Text(item.label) },
                         selected = currentRoute?.startsWith(item.route.removeSuffix("/{address}")) == true,
                         onClick = {
-                            // kalau route ada parameter (config/{address}), arahkan ke scan dulu
+                            // kalau route ada parameter, arahkan ke scan dulu
                             if (item.route.contains("{address}")) {
                                 navController.navigate("scan")
                             } else {
@@ -84,19 +76,27 @@ fun MainScreen(navController: NavHostController) {
                 ScanScreen(navController = navController)
             }
 
-            // Halaman Config, dengan argumen address
+            // Halaman GATT dari bottomnav (default)
+            composable("gatt") {
+                Text("Belum ada perangkat GATT dipilih")
+            }
+
+            // Halaman GATT detail dengan address
+            composable("gatt/{address}") { backStackEntry ->
+                val address = backStackEntry.arguments?.getString("address") ?: ""
+                GattScreen(deviceAddress = address)
+            }
+
+            // Halaman Config (SPP)
             composable("config/{address}") { backStackEntry ->
                 val address = backStackEntry.arguments?.getString("address") ?: ""
                 val bluetoothViewModel: BluetoothViewModel = viewModel()
                 val sppManager = remember { BluetoothSPPManager() }
-                // Ambil device dari BluetoothAdapter
                 val device = BluetoothAdapter.getDefaultAdapter()?.getRemoteDevice(address)
 
-                // Jalankan koneksi saat masuk halaman Config
                 LaunchedEffect(device) {
                     device?.let {
                         sppManager.connect(it) { message ->
-                            // ✅ Tambahkan timestamp di Android side
                             val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                             bluetoothViewModel.appendLog("[$timestamp] $message")
                         }
@@ -107,13 +107,12 @@ fun MainScreen(navController: NavHostController) {
                     deviceAddress = address,
                     bluetoothViewModel = bluetoothViewModel,
                     onSendConfig = { message ->
-                        sppManager.send(message) // ✅ kirim ke ESP32
+                        sppManager.send(message)
                         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                         bluetoothViewModel.appendLog("[$timestamp] Kirim: $message")
                     }
                 )
             }
-
 
             // Halaman kosong
             composable("empty") { EmptyScreen() }
