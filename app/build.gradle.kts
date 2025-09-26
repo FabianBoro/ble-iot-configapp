@@ -68,4 +68,7 @@ dependencies {
 //    implementation(androidx.core:core-ktx:1.13.1)
     implementation(libs.accompanist.pager)
     implementation(libs.accompanist.pager.indicators)
+    //for MQTT
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+
 }

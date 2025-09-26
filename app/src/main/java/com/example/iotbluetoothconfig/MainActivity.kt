@@ -1,10 +1,11 @@
 package com.example.iotbluetoothconfig
 
 import android.bluetooth.BluetoothAdapter
-import androidx.activity.ComponentActivity
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,13 +36,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
 @Composable
 fun MainScreen(navController: NavHostController) {
     val items = listOf(
         BottomNavItem("Scan", "scan"),
         BottomNavItem("Config", "config/{address}"),
         BottomNavItem("GATT", "gatt"),
-        BottomNavItem("Door lock", "empty")
+        BottomNavItem("Door lock", "doorlock") // ✅ ubah route ke "doorlock"
     )
 
     Scaffold(
@@ -53,7 +55,6 @@ fun MainScreen(navController: NavHostController) {
                         label = { Text(item.label) },
                         selected = currentRoute?.startsWith(item.route.removeSuffix("/{address}")) == true,
                         onClick = {
-                            // kalau route ada parameter, arahkan ke scan dulu
                             if (item.route.contains("{address}")) {
                                 navController.navigate("scan")
                             } else {
@@ -71,23 +72,23 @@ fun MainScreen(navController: NavHostController) {
             startDestination = "scan",
             modifier = androidx.compose.ui.Modifier.padding(innerPadding)
         ) {
-            // Halaman Scan
+            // 🔍 Halaman Scan
             composable("scan") {
                 ScanScreen(navController = navController)
             }
 
-            // Halaman GATT dari bottomnav (default)
+            // 📡 Halaman GATT dari bottomnav (default)
             composable("gatt") {
                 Text("Belum ada perangkat GATT dipilih")
             }
 
-            // Halaman GATT detail dengan address
+            // 📡 Halaman GATT detail
             composable("gatt/{address}") { backStackEntry ->
                 val address = backStackEntry.arguments?.getString("address") ?: ""
                 GattScreen(deviceAddress = address)
             }
 
-            // Halaman Config (SPP)
+            // 🔌 Halaman Config (SPP)
             composable("config/{address}") { backStackEntry ->
                 val address = backStackEntry.arguments?.getString("address") ?: ""
                 val bluetoothViewModel: BluetoothViewModel = viewModel()
@@ -114,7 +115,12 @@ fun MainScreen(navController: NavHostController) {
                 )
             }
 
-            // Halaman kosong
+            // 🚪 ✅ Halaman Door Lock
+            composable("doorlock") {
+                DoorLockScreen()
+            }
+
+            // 📄 Halaman kosong (dummy)
             composable("empty") { EmptyScreen() }
         }
     }
