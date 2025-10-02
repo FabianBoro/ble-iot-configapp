@@ -11,7 +11,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.*
+import java.util.LinkedList
+import java.util.Queue
 
 class GattViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -30,74 +34,115 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
     private val _services = MutableStateFlow<List<BluetoothGattService>>(emptyList())
     val services: StateFlow<List<BluetoothGattService>> = _services
 
+    // Config values untuk UI
+    private val _configValues =
+        MutableStateFlow<Map<UUID, String>>(emptyMap())
+    val configValues: StateFlow<Map<UUID, String>> = _configValues
+
+    // antrian read
+    private val readQueue: Queue<BluetoothGattCharacteristic> = LinkedList()
+
     // client config descriptor UUID (CCC)
-    private val CCC_DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    private val CCC_DESCRIPTOR_UUID =
+        UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    // Public API: aktifkan notification (set + write CCC descriptor)
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun enableNotifications(serviceUuid: UUID, charUuid: UUID) {
+        val service = bluetoothGatt?.getService(serviceUuid)
+        val characteristic = service?.getCharacteristic(charUuid)
+        if (characteristic != null) {
+            val setOk =
+                bluetoothGatt?.setCharacteristicNotification(characteristic, true) ?: false
+            appendLog("setCharacteristicNotification $charUuid => $setOk")
+            val ccc = characteristic.getDescriptor(CCC_DESCRIPTOR_UUID)
+            if (ccc != null) {
+                ccc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                val writeOk = bluetoothGatt?.writeDescriptor(ccc)
+                appendLog("writeDescriptor CCC for $charUuid (ok=$writeOk)")
+            } else {
+                appendLog("Descriptor CCC tidak ditemukan untuk $charUuid")
+            }
+        } else {
+            appendLog("Characteristic $charUuid tidak ditemukan")
+        }
+    }
 
     private val gattCallback = object : BluetoothGattCallback() {
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-        override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
+        override fun onConnectionStateChange(
+            gatt: BluetoothGatt?,
+            status: Int,
+            newState: Int
+        ) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 appendLog("onConnectionStateChange error status=$status")
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 appendLog("Terhubung ke ${gatt?.device?.address}, discover service...")
                 _connectedDeviceAddress.value = gatt?.device?.address
-                // request MTU (opsional)
                 gatt?.requestMtu(517)
                 gatt?.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 appendLog("Terputus dari perangkat GATT (status=$status)")
                 _connectedDeviceAddress.value = null
                 _services.value = emptyList()
+                _configValues.value = emptyMap()
             }
         }
 
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS && gatt != null) {
                 appendLog("Services ditemukan: ${gatt.services.size}")
                 _services.value = gatt.services
 
-                // auto: baca Device Name & Manufacturer (jika ada)
-                readCharacteristicIfExists(
-                    gatt,
-                    UUID.fromString(SERVICE_DEVICE_INFORMATION),
-                    UUID.fromString(CHAR_DEVICE_NAME)
-                )
-                readCharacteristicIfExists(
-                    gatt,
-                    UUID.fromString(SERVICE_DEVICE_INFORMATION),
-                    UUID.fromString(CHAR_MANUFACTURER_NAME)
-                )
-
-                // auto: aktifkan notify untuk heart rate & battery kalau ada
-                enableNotificationsIfExists(
-                    gatt,
-                    UUID.fromString(SERVICE_HEART_RATE),
-                    UUID.fromString(CHAR_HEART_RATE_MEASUREMENT)
-                )
-                enableNotificationsIfExists(
-                    gatt,
-                    UUID.fromString(SERVICE_BATTERY),
-                    UUID.fromString(CHAR_BATTERY_LEVEL)
-                )
-
-                // start periodic battery read (loop yang berhenti saat disconnect)
-                startPeriodicBatteryRead()
+                // baca config service characteristic satu-satu via queue
+                gatt.getService(CONFIG_SERVICE_UUID)?.let { svc ->
+                    listOf(
+                        DEV_EUI_CHAR_UUID,
+                        APP_EUI_CHAR_UUID,
+                        APP_KEY_CHAR_UUID,
+                        INTERVAL_CHAR_UUID,
+                        CLASS_CHAR_UUID
+                    ).forEach { uuid ->
+                        svc.getCharacteristic(uuid)?.let { enqueueRead(it, gatt) }
+                    }
+                }
             } else {
                 appendLog("Service discovery gagal, status=$status")
             }
         }
 
+
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onCharacteristicRead(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?,
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS && characteristic != null) {
-                val value = characteristic.value?.decodeToString()
-                appendLog("Read ${characteristic.uuid}: $value")
+                val value = characteristic.value ?: byteArrayOf()
+                val pretty = when (characteristic.uuid) {
+                    DEV_EUI_CHAR_UUID, APP_EUI_CHAR_UUID, APP_KEY_CHAR_UUID ->
+                        value.toHexString("-")
+                    INTERVAL_CHAR_UUID ->
+                        ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).int.toString()
+                    CLASS_CHAR_UUID -> when (value.firstOrNull()?.toInt()) {
+                        0 -> "Class A"
+                        1 -> "Class B"
+                        2 -> "Class C"
+                        else -> "Unknown"
+                    }
+                    else -> value.toHexOrAscii()
+                }
+                updateCharValue(characteristic.uuid, pretty)
+                appendLog("Read ${characteristic.uuid}: $pretty")
+
+                handleNextRead(gatt)
             } else {
                 appendLog("Read gagal status=$status")
+                handleNextRead(gatt)
             }
         }
 
@@ -105,12 +150,15 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?
         ) {
-            val value = characteristic?.value?.decodeToString()
+            val value = characteristic?.value?.toHexOrAscii()
             appendLog("Notify ${characteristic?.uuid}: $value")
         }
 
-        override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
-            super.onDescriptorWrite(gatt, descriptor, status)
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt?,
+            descriptor: BluetoothGattDescriptor?,
+            status: Int
+        ) {
             appendLog("onDescriptorWrite ${descriptor?.uuid} status=$status")
         }
 
@@ -119,16 +167,18 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
             characteristic: BluetoothGattCharacteristic?,
             status: Int
         ) {
-            super.onCharacteristicWrite(gatt, characteristic, status)
-            appendLog("onCharacteristicWrite ${characteristic?.uuid} status=$status")
+            appendLog(
+                "onCharacteristicWrite ${characteristic?.uuid} " +
+                        "status=$status value=${characteristic?.value?.toHexOrAscii()}"
+            )
         }
 
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
-            super.onMtuChanged(gatt, mtu, status)
             appendLog("MTU berubah: $mtu (status=$status)")
         }
     }
 
+    // --- Public API ---
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun connect(device: BluetoothDevice) {
         bluetoothGatt?.close()
@@ -146,73 +196,51 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
         _connectedDeviceAddress.value = null
     }
 
-    // Public API: baca characteristic tertentu
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun readCharacteristic(serviceUuid: UUID, charUuid: UUID) {
         val service = bluetoothGatt?.getService(serviceUuid)
         val characteristic = service?.getCharacteristic(charUuid)
         if (characteristic != null) {
-            val ok = bluetoothGatt?.readCharacteristic(characteristic)
-            appendLog("Request read $charUuid (ok=$ok)")
+            enqueueRead(characteristic, bluetoothGatt!!)
+            appendLog("Request read $charUuid")
         } else {
             appendLog("Characteristic $charUuid tidak ditemukan")
         }
     }
 
-    // Public API: aktifkan notification (set + write CCC descriptor)
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    fun enableNotifications(serviceUuid: UUID, charUuid: UUID) {
+    fun writeCharacteristic(serviceUuid: UUID, charUuid: UUID, value: ByteArray) {
         val service = bluetoothGatt?.getService(serviceUuid)
         val characteristic = service?.getCharacteristic(charUuid)
         if (characteristic != null) {
-            val setOk = bluetoothGatt?.setCharacteristicNotification(characteristic, true) ?: false
-            appendLog("setCharacteristicNotification $charUuid => $setOk")
-            val ccc = characteristic.getDescriptor(CCC_DESCRIPTOR_UUID)
-            if (ccc != null) {
-                ccc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                val writeOk = bluetoothGatt?.writeDescriptor(ccc)
-                appendLog("writeDescriptor CCC for $charUuid (ok=$writeOk)")
-            } else {
-                appendLog("Descriptor CCC tidak ditemukan untuk $charUuid")
-            }
+            characteristic.value = value
+            bluetoothGatt?.writeCharacteristic(characteristic)
+            appendLog("Request write $charUuid value=${value.toHexOrAscii()}")
         } else {
             appendLog("Characteristic $charUuid tidak ditemukan")
         }
     }
 
-    // --- helper internal dipakai otomatis pada discovery ---
-    private fun readCharacteristicIfExists(gatt: BluetoothGatt, serviceUuid: UUID, charUuid: UUID) {
-        val service = gatt.getService(serviceUuid) ?: return
-        val char = service.getCharacteristic(charUuid) ?: return
-        gatt.readCharacteristic(char)
-    }
-
-    private fun enableNotificationsIfExists(gatt: BluetoothGatt, serviceUuid: UUID, charUuid: UUID) {
-        val service = gatt.getService(serviceUuid) ?: return
-        val char = service.getCharacteristic(charUuid) ?: return
-        gatt.setCharacteristicNotification(char, true)
-        val ccc = char.getDescriptor(CCC_DESCRIPTOR_UUID)
-        if (ccc != null) {
-            ccc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            gatt.writeDescriptor(ccc)
+    // --- Queue Helpers ---
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun enqueueRead(char: BluetoothGattCharacteristic, gatt: BluetoothGatt) {
+        readQueue.add(char)
+        if (readQueue.size == 1) {
+            gatt.readCharacteristic(char)
         }
     }
 
-    // loop baca battery setiap 20 detik, berhenti kalau bluetoothGatt == null
-    private fun startPeriodicBatteryRead() {
-        viewModelScope.launch {
-            while (bluetoothGatt != null) {
-                try {
-                    delay(20_000)
-                    readCharacteristicIfExists(
-                        bluetoothGatt ?: return@launch,
-                        UUID.fromString(SERVICE_BATTERY),
-                        UUID.fromString(CHAR_BATTERY_LEVEL)
-                    )
-                } catch (t: Throwable) {
-                    appendLog("Periodic read error: ${t.message}")
-                }
-            }
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun handleNextRead(gatt: BluetoothGatt?) {
+        if (readQueue.isNotEmpty()) {
+            readQueue.poll()
+            readQueue.peek()?.let { gatt?.readCharacteristic(it) }
+        }
+    }
+
+    private fun updateCharValue(uuid: UUID, value: String) {
+        _configValues.value = _configValues.value.toMutableMap().apply {
+            put(uuid, value)
         }
     }
 
@@ -224,9 +252,26 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // UUID standar
     companion object {
-        const val SERVICE_DEVICE_INFORMATION = "0000180a-0000-1000-8000-00805f9b34fb"
+        // Config service + characteristic UUIDs
+        val CONFIG_SERVICE_UUID: UUID =
+            UUID.fromString("e54b0001-67f5-479e-8711-b3b99198ce6c")
+        val DEV_EUI_CHAR_UUID: UUID =
+            UUID.fromString("e54b0002-67f5-479e-8711-b3b99198ce6c")
+        val APP_EUI_CHAR_UUID: UUID =
+            UUID.fromString("e54b0003-67f5-479e-8711-b3b99198ce6c")
+        val APP_KEY_CHAR_UUID: UUID =
+            UUID.fromString("e54b0004-67f5-479e-8711-b3b99198ce6c")
+        val INTERVAL_CHAR_UUID: UUID =
+            UUID.fromString("e54b0005-67f5-479e-8711-b3b99198ce6c")
+        val CLASS_CHAR_UUID: UUID =
+            UUID.fromString("e54b0006-67f5-479e-8711-b3b99198ce6c")
+        val RESTART_CHAR_UUID: UUID =
+            UUID.fromString("e54b0007-67f5-479e-8711-b3b99198ce6c")
+
+        // UUID standar
+        const val SERVICE_DEVICE_INFORMATION =
+            "0000180a-0000-1000-8000-00805f9b34fb"
         const val CHAR_DEVICE_NAME = "00002a00-0000-1000-8000-00805f9b34fb"
         const val CHAR_MANUFACTURER_NAME = "00002a29-0000-1000-8000-00805f9b34fb"
 
@@ -234,7 +279,8 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
         const val CHAR_BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"
 
         const val SERVICE_HEART_RATE = "0000180d-0000-1000-8000-00805f9b34fb"
-        const val CHAR_HEART_RATE_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"
+        const val CHAR_HEART_RATE_MEASUREMENT =
+            "00002a37-0000-1000-8000-00805f9b34fb"
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -242,4 +288,17 @@ class GattViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
         disconnect()
     }
+}
+
+// === Helpers ===
+private fun ByteArray.toHexOrAscii(): String {
+    return if (all { it in 0x20..0x7E }) {
+        String(this)
+    } else {
+        joinToString(" ") { "%02X".format(it) }
+    }
+}
+
+private fun ByteArray.toHexString(separator: String = ""): String {
+    return joinToString(separator) { "%02X".format(it) }
 }

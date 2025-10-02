@@ -1,13 +1,16 @@
 package com.example.iotbluetoothconfig.data
 
+import android.Manifest
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import java.util.*
+
 
 class BluetoothGattManager(
     private val context: Context
-) {
+) {@RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private var bluetoothGatt: BluetoothGatt? = null
 
     // Listener untuk event callback ke ViewModel / UI
@@ -18,6 +21,7 @@ class BluetoothGattManager(
     var onCharacteristicWrite: ((uuid: UUID, success: Boolean) -> Unit)? = null
 
     private val gattCallback = object : BluetoothGattCallback() {
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d("GattManager", "Connected to GATT server")
@@ -64,26 +68,28 @@ class BluetoothGattManager(
             onCharacteristicWrite?.invoke(characteristic?.uuid ?: UUID(0,0), success)
         }
     }
-
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun connect(device: BluetoothDevice) {
         bluetoothGatt = device.connectGatt(context, false, gattCallback)
     }
-
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun disconnect() {
         bluetoothGatt?.disconnect()
         bluetoothGatt?.close()
         bluetoothGatt = null
     }
-
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun readCharacteristic(characteristic: BluetoothGattCharacteristic) {
         bluetoothGatt?.readCharacteristic(characteristic)
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun writeCharacteristic(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
         characteristic.value = value
-        bluetoothGatt?.writeCharacteristic(characteristic)
+        val ok = bluetoothGatt?.writeCharacteristic(characteristic) ?: false
+        Log.d("GattManager", "Write ${characteristic.uuid} value=${value.joinToString(" ") { "%02X".format(it) }} (ok=$ok)")
     }
-
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun enableNotifications(characteristic: BluetoothGattCharacteristic) {
         bluetoothGatt?.setCharacteristicNotification(characteristic, true)
         val descriptor = characteristic.getDescriptor(

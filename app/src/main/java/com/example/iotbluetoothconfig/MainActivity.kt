@@ -19,16 +19,18 @@ import com.example.iotbluetoothconfig.data.BluetoothSPPManager
 import com.example.iotbluetoothconfig.ui.theme.IoTBluetoothConfigTheme
 import com.example.iotbluetoothconfig.ui.view.*
 import com.example.iotbluetoothconfig.viewmodel.BluetoothViewModel
+import com.example.iotbluetoothconfig.viewmodel.GattViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : ComponentActivity() {
+    @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         setContent {
-            IoTBluetoothConfigTheme {
+            IoTBluetoothConfigTheme  {
                 val navController = rememberNavController()
                 MainScreen(navController)
             }
@@ -85,7 +87,13 @@ fun MainScreen(navController: NavHostController) {
             // 📡 Halaman GATT detail
             composable("gatt/{address}") { backStackEntry ->
                 val address = backStackEntry.arguments?.getString("address") ?: ""
-                GattScreen(deviceAddress = address)
+                val gattViewModel: GattViewModel = viewModel()
+
+                // langsung gunakan pager screen
+                GattPagerScreen(
+                    deviceAddress = address,
+                    gattViewModel = gattViewModel
+                )
             }
 
             // 🔌 Halaman Config (SPP)

@@ -7,10 +7,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.iotbluetoothconfig.viewmodel.BluetoothViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SerialMonitorScreen(logs: List<String>) {
+fun SerialMonitorScreen(viewModel: BluetoothViewModel) {
+    val logs by viewModel.logs.collectAsState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -35,3 +38,4 @@ fun SerialMonitorScreen(logs: List<String>) {
         }
     }
 }
+

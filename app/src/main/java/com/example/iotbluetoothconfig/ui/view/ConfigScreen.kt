@@ -1,6 +1,11 @@
+@file:Suppress("DEPRECATION")
+
 package com.example.iotbluetoothconfig.ui.view
 
+import android.Manifest
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -9,18 +14,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.iotbluetoothconfig.data.BluetoothSPPManager
+import com.example.iotbluetoothconfig.viewmodel.BluetoothViewModel
 
+@RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConfigScreen(
     deviceAddress: String?,
-    sppManager: BluetoothSPPManager = BluetoothSPPManager() // inject manager
+    sppManager: BluetoothSPPManager = BluetoothSPPManager(),
+    viewModel: BluetoothViewModel, // 🔹 inject ViewModel
+    onSendConfig: (String) -> Unit = {}
 ) {
     var ssid by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var ipAddress by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("") }
-    var log by remember { mutableStateOf("Belum ada aksi") }
+
+    val adapter = BluetoothAdapter.getDefaultAdapter()
+    val device: BluetoothDevice? = remember(deviceAddress) {
+        deviceAddress?.let { addr -> adapter?.getRemoteDevice(addr) }
+    }
+
+    val deviceName = device?.name ?: "Unknown"
+    val deviceAddr = device?.address ?: "Unknown"
 
     Scaffold(
         topBar = {
@@ -41,7 +57,8 @@ fun ConfigScreen(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Device: ${deviceAddress ?: "Unknown"}")
+            // 🔹 tampilkan nama + address
+            Text("Device: $deviceName ($deviceAddr)")
 
             Spacer(Modifier.height(16.dp))
 
@@ -84,37 +101,25 @@ fun ConfigScreen(
             Button(
                 onClick = {
                     val configString = "$ssid,$password,$ipAddress,$port"
-
-                    if (deviceAddress != null) {
-                        // Cari device berdasarkan address
-                        val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
-                        val device: BluetoothDevice? = adapter?.getRemoteDevice(deviceAddress)
-
-                        if (device != null) {
-                            // Untuk ESP32 (SPP)
-                            sppManager.connect(device) { response ->
-                                log = "Respon: $response"
-                            }
-                            sppManager.send(configString)
-                            log = "Kirim ke $deviceAddress: $configString"
-
-                            // TODO: Untuk RAK4631 BLE → pakai GATT + writeCharacteristic
-                            // (nanti kita buat BluetoothGattManager terpisah)
-                        } else {
-                            log = "Device tidak ditemukan!"
+                    if (device != null) {
+                        sppManager.connect(device) { response ->
+                            // simpan log ke ViewModel
+                            viewModel.appendLog("Respon: $response")
                         }
+                        sppManager.send(configString)
+                        viewModel.appendLog("📤 Kirim ke $deviceAddr: $configString")
+                        onSendConfig(configString)
+                        viewModel.appendLog("📤ESP32 Reboot")
+                        // TODO: Untuk RAK4631 BLE → pakai GATT + writeCharacteristic
                     } else {
-                        log = "Alamat device tidak valid!"
+                        viewModel.appendLog("❌ Device tidak ditemukan!")
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Kirim")
             }
-
-            Spacer(Modifier.height(16.dp))
-
-            Text("Log: $log", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
+

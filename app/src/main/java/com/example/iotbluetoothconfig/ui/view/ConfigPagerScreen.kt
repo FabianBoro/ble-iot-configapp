@@ -20,6 +20,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
+@androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
 fun ConfigPagerScreen(
     deviceAddress: String,
     bluetoothViewModel: BluetoothViewModel,
@@ -30,7 +31,10 @@ fun ConfigPagerScreen(
 
     Box(Modifier.fillMaxSize()) {
         // layar utama Config
-        ConfigScreen(deviceAddress = deviceAddress)
+        ConfigScreen(
+            deviceAddress = deviceAddress,
+            viewModel = bluetoothViewModel
+        )
 
         // tombol untuk buka drawer kanan
         FloatingActionButton(

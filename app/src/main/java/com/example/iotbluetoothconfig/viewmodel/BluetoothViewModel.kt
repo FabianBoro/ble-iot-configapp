@@ -13,8 +13,12 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
+
 
     private val context = app.applicationContext
     private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
@@ -52,15 +56,16 @@ class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- Scan ----------
+    @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_SCAN)
     fun startScan() {
-        viewModelScope.launch {
+        viewModelScope.launch  {
             _devices.value = emptyList()
             bluetoothAdapter?.cancelDiscovery()
             bluetoothAdapter?.startDiscovery()
             bleScanner?.startScan(bleCallback)
         }
     }
-
+    @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_SCAN)
     fun stopScan() {
         bluetoothAdapter?.cancelDiscovery()
         bleScanner?.stopScan(bleCallback)
@@ -77,9 +82,10 @@ class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Logs ----------
     fun appendLog(message: String) {
+        val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         viewModelScope.launch {
             val updated = _logs.value.toMutableList()
-            updated.add(message)
+            updated.add("[$ts] $message")
             _logs.value = updated
         }
     }
@@ -87,7 +93,7 @@ class BluetoothViewModel(app: Application) : AndroidViewModel(app) {
     fun clearLogs() {
         _logs.value = emptyList()
     }
-
+    @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_SCAN)
     override fun onCleared() {
         super.onCleared()
         stopScan()
